@@ -1,0 +1,440 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Drawing;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace Mini_Compiler
+{
+    public partial class Form1 : Form
+    {
+        public class variable
+        {
+            public string type;
+            public string name;
+            public int lineNo;
+            public string value;
+            public int variableNo;
+        }
+        public Form1()
+        {
+            InitializeComponent();
+        }
+
+        Regex variable_Reg = new Regex(@"^[A-Za-z|_][A-Za-z|0-9]*$");
+        Regex constants_Reg = new Regex(@"^[0-9]+([.][0-9]+)?([e]([+|-])?[0-9]+)?$");
+        Regex operators_Reg = new Regex(@"^[-*+/=]$");
+        Regex operators_Reg2 = new Regex(@"^[-*+/]$");
+        Regex Special_Reg = new Regex(@"^[.,'\[\]{}();:?]$");
+        Regex numeric = new Regex(@"^(int)\s([A-Za-z|_][A-Za-z|0-9]{0,10})\s(=)\s([0-9]+([.][0-9]+)?([e][+|-]?[0-9]+)?)$");
+        Regex decimalpoint = new Regex(@"^(float)\s([A-Za-z|_][A-Za-z|0-9]{0,10})\s(=)\s([0-9]+([.][0-9]+)?([e][+|-]?[0-9]+)?)$");
+        Regex strings = new Regex(@"^(string)\s([A-Za-z|_][A-Za-z|0-9]{0,10})\s(=)\s[']([A-Za-z|_][A-Za-z|0-9]{0,30})[']$");
+        Dictionary<String, Dictionary<Regex, String>> automaton = new Dictionary<string, Dictionary<Regex, String>>();
+
+        List<String> keywordList = new List<String>() { "int", "float", "string" };
+
+        Dictionary<string, variable> symbolTable = new Dictionary<string, variable>();
+
+        int lineCount = 0;
+        int variableCount = 0;
+
+        private void button1_Click(object sender, EventArgs e)
+        {
+            automaton.Add("S0", new Dictionary<Regex, string>()
+                    {
+                        {new Regex("^(?!(int|float|string)).*$") ,"Error"},
+                        { new Regex("^(int|float|string)$"),"S1" }
+                        
+                    });
+            automaton.Add("S1", new Dictionary<Regex, string>()
+                     {
+                        { new Regex(@"^(?!([A-Za-z|_][A-Za-z|0-9])).*$"),"Error" },
+                        { new Regex(@"^[A-Za-z|_][A-Za-z|0-9]*$") , "S2"}
+                         
+                     });
+            automaton.Add("S2", new Dictionary<Regex, string>() {
+
+                         {new Regex(@"^(?!=).*$"),"Error" },
+                         { new Regex(@"^=$"),"S3" }
+                     });
+            automaton.Add("S3", new Dictionary<Regex, string>
+                     {
+                         {new Regex(@"^(?!([A-Za-z|_][A-Za-z|0-9])).*$"),"Error" },
+                         {new Regex(@"^(string)\s([A-Za-z|_][A-Za-z|0-9]{0,10})\s(=)\s[']([A-Za-z|_][A-Za-z|0-9]{0,30})[']$"),"S4" },
+                         {new Regex(@"([0-9]+([.][0-9]+)?([e][+|-]?[0-9]+)?)$"), "S4" },
+                         {new Regex(@"^[A-Za-z|_][A-Za-z|0-9]*$"),"S5" }
+                         
+                     });
+            automaton.Add("S4", new Dictionary<Regex, string>
+                     {
+                         {new Regex(@"^[-*+/]$"),"S3" },
+                         {new Regex(@"^(?![-*+/]).*$"),"S5" }
+                     });
+            automaton.Add("S5", new Dictionary<Regex, string>
+                     {
+                         {new Regex(@"(?!;).*$"),"Error" },
+                         {new Regex(@"^;$"),"Success" }
+                     });
+
+            lineCount = 0;
+            variableCount = 0;
+            Tokens.Clear();
+            threeAddressCode.Clear();
+            SymbolTable.Clear();
+            symbolTable.Clear();
+
+            bool lex = lexicalAnalyze();
+            if (lex)
+            {
+                bool synt = syntaticAnalyze();
+                if (synt)
+                {
+                    bool semant = semanticAnalyze();
+                }
+
+            }
+        }
+        private bool lexicalAnalyze()
+        {
+
+            string codeLines = Regex.Replace(Code.Text, @"\t|\n|\r", "");
+            var codelines = codeLines.Split(';');
+
+            foreach (var codeLine in codelines)
+            {
+                lineCount++;
+
+                var Code = codeLine.Split(' ');
+
+                foreach (var codeLex in Code)
+                {
+
+                    if (keywordList.Contains(codeLex))
+                    {
+                        Tokens.AppendText("<keyword, " + codeLex + "> ");
+
+                        if (numeric.Match(codeLine).Success || decimalpoint.Match(codeLine).Success || strings.Match(codeLine).Success)
+                        {
+
+                            var temp = codeLine.Split(' ');
+                            if (symbolTable.Keys.Contains(temp[1]))
+                            {
+                                MessageBox.Show("Variable <" + temp[1] + "> Redefined At: " + lineCount);
+                                return false;
+                            }
+                            else
+                            {
+                                variableCount++;
+                                SymbolTable.AppendText(lineCount + "   " + temp[1] + "   " + temp[0] + "   " + temp[3] + "   " + variableCount + "\n");
+                                symbolTable.Add(temp[1], new variable() { name = temp[1], lineNo = lineCount, type = temp[0], value = temp[3], variableNo = variableCount });
+                            }
+
+                        }
+                    }
+                    else if (variable_Reg.Match(codeLex).Success)
+                    {
+                        Tokens.AppendText("< var, " + codeLex + "> ");
+                    }
+                    else if (constants_Reg.Match(codeLex).Success)
+                    {
+                        Tokens.AppendText("< digit, " + codeLex + "> ");
+                    }
+                    else if (operators_Reg.Match(codeLex).Success)
+                    {
+                        Tokens.AppendText("< op, " + codeLex + "> ");
+                    }
+                    else if (codeLex != "")
+                    {
+                        if (codeLex.ElementAt(0) == '\'' && codeLex.ElementAt(codeLex.Length - 1) == '\'')
+                        {
+                            Tokens.AppendText("< string, " + codeLex + "> ");
+                        }
+                    }
+                    else if (Special_Reg.Match(codeLex).Success)
+                    {
+                        Tokens.AppendText("< punc, " + codeLex + "> ");
+                    }
+                }
+
+            }
+            return true;
+        }
+
+        private bool syntaticAnalyze()
+        {
+            var chars = Code.Text.Split('\n');
+            var state = "S0";
+
+            foreach (var chr in chars)
+            {
+                var ch = chr.Replace(';', ' ');
+                ch = ch + ";";
+                foreach (var c in ch.Split(' '))
+                {
+                    if (state == "Error")
+                    {
+                        foreach (var x in automaton[state])
+                        {
+                            if (x.Key.Match(c + "").Success)
+                            {
+                                state = x.Value;
+                            }
+                        }
+                    }
+                }
+
+            }
+
+            return true;
+        }
+
+        private bool semanticAnalyze()
+        {
+
+            string codeLines = Regex.Replace(Code.Text, @"\t|\n|\r", "");
+            var codelines = codeLines.Split(';');
+            foreach (var codeLine in codelines)
+            {
+                foreach (var codeLex in codeLine.Split(' '))
+                {
+                    if (operators_Reg2.Match(codeLex).Success)
+                    {
+                        var temp = codeLine.Split('=');
+                        var temp2 = temp[0].Split(' ');
+                        var val = evaluateExpression(temp[1], temp2[0]);
+                        variableCount++;
+                        symbolTable.Add(temp2[1], new variable() { name = temp2[1], type = temp2[0], value = val, lineNo = lineCount, variableNo = variableCount });
+                        SymbolTable.AppendText(lineCount + "   " + temp2[1] + "   " + temp2[0] + "   " + val + "   " + variableCount + "\n");
+                        break;
+                    }
+                    if (operators_Reg.Match(codeLex).Success)
+                    {
+                        var temp = codeLine.Split('=');
+                        var temp2 = temp[0].Split(' ');
+                        generateThreeAddressCode(temp2[1], temp[1]);
+                    }
+                }
+
+            }
+            return true;
+        }
+
+        private void generateThreeAddressCode(string assign, string expression)
+        {
+            var threeAddress = "";
+            int varCount = 0;
+            var temp = expression.Split(' ');
+            for (int i = 0; i < temp.Length; i++)
+            {
+                if (operators_Reg2.Match(temp[i]).Success)
+                {
+                    if (threeAddress == "")
+                    {
+                        if (i + 1 == temp.Length - 1)
+                        {
+                            threeAddress += assign + " =: " + temp[i - 1] + " " + temp[i] + " " + temp[i + 1] + "\n";
+                        }
+                        else
+                        {
+                            threeAddress += "t" + varCount + " =: " + temp[i - 1] + " " + temp[i] + " " + temp[i + 1] + "\n";
+                        }
+                    }
+                    else
+                    {
+                        if (i + 1 == temp.Length - 1)
+                        {
+                            threeAddress += assign + " =: " + "t" + (varCount - 1) + " " + temp[i] + " " + temp[i + 1] + "\n";
+                        }
+                        else
+                        {
+                            threeAddress += "t" + varCount + " =: " + "t" + (varCount - 1) + " " + temp[i] + " " + temp[i + 1] + "\n";
+                        }
+                    }
+                    varCount++;
+                }
+            }
+
+            if (expression.Split(' ').Length <= 2)
+            {
+                threeAddress += assign + " =:" + expression + "\n";
+            }
+            threeAddressCode.AppendText(threeAddress);
+        }
+
+        private string evaluateExpression(string temp, string type)
+        {
+            string val = "";
+            string val1 = "";
+            string val2 = "";
+            var temps = temp.Split(' ');
+            for (int i = 0; i < temps.Length; i++)
+            {
+                if (operators_Reg.Match(temps[i]).Success)
+                {
+                    if (val == "")
+                    {
+
+                        if (symbolTable.Keys.Contains(temps[i - 1]))
+                        {
+                            val1 = symbolTable[temps[i - 1]].value;
+                            var typ = symbolTable[temps[i - 1]].type;
+                            if (!(typ == type || type == "string" || (type == "float" && typ == "int")))
+                            {
+                                MessageBox.Show("Type Mismath var <" + temps[i - 1] + ">");
+                                return null;
+                            }
+                        }
+                        else
+                        {
+                            try
+                            {
+                                if (type == "int")
+                                {
+
+                                    val1 = Convert.ToInt32(temps[i - 1]) + "";
+
+                                }
+
+
+                                else if (type == "float")
+                                {
+                                    val1 = Convert.ToDouble(temps[i - 1]) + "";
+                                }
+                                else if (type == "string")
+                                {
+                                    val1 = temps[i - 1];
+                                }
+
+                            }
+
+                            catch (Exception e)
+                            {
+                                MessageBox.Show("Undefined " + temps[i - 1]);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        val1 = val;
+                    }
+                    if (symbolTable.Keys.Contains(temps[i + 1]))
+                    {
+                        val2 = symbolTable[temps[i + 1]].value;
+                        var typ = symbolTable[temps[i + 1]].type;
+                        if (!(typ == type || type == "string" || (type == "float" && typ == "int")))
+                        {
+                            MessageBox.Show("Type Mismath var <" + temps[i - 1] + ">");
+                            return null;
+                        }
+                    }
+                    else
+                    {
+                        try
+                        {
+                            if (type == "int")
+                            {
+
+                                val2 = Convert.ToInt32(temps[i + 1]) + "";
+                            }
+
+
+                            else if (type == "float")
+                            {
+                                val2 = Convert.ToDouble(temps[i + 1]) + "";
+                            }
+                            else if (type == "string")
+                            {
+                                val2 = temps[i + 1];
+                            }
+
+                        }
+
+                        catch (Exception e)
+                        {
+                            MessageBox.Show("Undefined " + temps[i + 1]);
+                        }
+                    }
+                    if (type == "int")
+                    {
+                        var valv1 = Convert.ToInt32(val1);
+                        var valv2 = Convert.ToInt32(val2);
+
+                        if (temps[i] == "+")
+                        {
+                            val = "" + (valv1 + valv2);
+                        }
+                        else if (temps[i] == "-")
+                        {
+                            val = "" + (valv1 - valv2);
+                        }
+                        else if (temps[i] == "*")
+                        {
+                            val = "" + (valv1 * valv2);
+                        }
+                        if (temps[i] == "/")
+                        {
+                            if (valv2 == 0)
+                            {
+                                MessageBox.Show("Division by Zero");
+                                return null;
+                            }
+                            val = "" + (valv1 / valv2);
+                        }
+
+                    }
+                    else if (type == "float")
+                    {
+                        var valv1 = Convert.ToInt32(val1);
+                        var valv2 = Convert.ToInt32(val1);
+                        if (temps[i] == "+")
+                        {
+                            val = "" + (valv1 + valv2);
+                        }
+                        else if (temps[i] == "-")
+                        {
+                            val = "" + (valv1 - valv2);
+                        }
+                        else if (temps[i] == "*")
+                        {
+                            val = "" + (valv1 * valv2);
+                        }
+                        if (temps[i] == "/")
+                        {
+                            if (valv2 == 0)
+                            {
+                                MessageBox.Show("Division by Zero");
+                                return null;
+                            }
+                            val = "" + (valv1 / valv2);
+                        }
+                    }
+                    else if (type == "string")
+                    {
+                        if (temps[i] == "+")
+                        {
+                            val1 = Regex.Replace(val1, @"'", "");
+                            val2 = Regex.Replace(val2, @"'", "");
+                            val = "'" + val1 + val2 + "'";
+                        }
+                        else
+                        {
+                            MessageBox.Show("Operator " + temps[i] + " is not valid for Strings");
+                        }
+                    }
+                }
+            }
+            return val;
+        }
+
+        private void threeAddressCode_TextChanged(object sender, EventArgs e)
+        {
+
+        }
+    }
+}
